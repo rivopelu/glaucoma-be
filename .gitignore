@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.DS_Store
+
+# Virtual environment
+venv/
+env/
+*.venv
+
+# Model file
+model.h5
+*.h5
+*.hdf5
+
+# File upload dan hasil proses
+uploads/
+instance/
+
+# Konfigurasi environment
+.env
+config.json
