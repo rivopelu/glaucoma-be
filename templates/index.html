@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glaucoma Detection</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        .container { max-width: 600px; margin: auto; }
+        img { width: 100%; max-width: 400px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Glaucoma Detection</h1>
+        <form action="/" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" required>
+            <button type="submit">Upload and Analyze</button>
+        </form>
+
+        {% if error %}
+            <p style="color: red;">{{ error }}</p>
+        {% endif %}
+
+        {% if uploaded_image %}
+            <h3>Uploaded Image:</h3>
+            <img src="{{ url_for('static', filename='uploads/' + uploaded_image) }}" alt="Uploaded Image">
+
+            <h3>Grad-CAM Visualization:</h3>
+            <img src="{{ url_for('static', filename='results/' + gradcam_image) }}" alt="GradCAM Image">
+
+            <h3>Prediction:</h3>
+            <p><strong>{{ predicted_class }}</strong> (Confidence: {{ confidence }}%)</p>
+        {% endif %}
+    </div>
+</body>
+</html>

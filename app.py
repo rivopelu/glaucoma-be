@@ -1,11 +1,13 @@
-from flask import Flask, request, jsonify
 import os
-import numpy as np
+
 import cv2
+import numpy as np
 import tensorflow as tf
+from flask import Flask, request, jsonify, send_from_directory
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from werkzeug.utils import secure_filename
+from flask_cors import CORS
 
 app = Flask(__name__)
 
@@ -15,13 +17,17 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['RESULT_FOLDER'] = RESULT_FOLDER
 app.secret_key = "secret"
-
+CORS(app)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 model = load_model("model.h5")
 
 CLASS_NAMES = ["Normal", "Glaucoma"]
+EXPLANATIONS = {
+    "Normal": "Hasil analisis menunjukkan bahwa mata Anda berada dalam kondisi normal. Tidak ditemukan indikasi glaukoma dalam gambar yang diberikan.",
+    "Glaucoma": "Hasil analisis menunjukkan kemungkinan adanya glaukoma. Glaukoma adalah penyakit mata yang dapat menyebabkan kehilangan penglihatan jika tidak ditangani. Silakan konsultasikan dengan dokter spesialis mata untuk pemeriksaan lebih lanjut."
+}
 
 
 def allowed_file(filename):
@@ -54,64 +60,55 @@ def generate_gradcam(image_path, model, layer_name="conv1_conv", alpha=0.6):
     conv_outputs = conv_outputs[0]
     heatmap = tf.reduce_mean(tf.multiply(conv_outputs, pooled_grads), axis=-1)
     heatmap = np.maximum(heatmap, 0)
-    heatmap /= np.max(heatmap)  # Normalisasi heatmap
+    heatmap /= np.max(heatmap)
 
-    # Baca gambar asli
     original_img = cv2.imread(image_path)
     original_img = cv2.resize(original_img, (224, 224))
 
-    # Resize heatmap agar sesuai dengan ukuran gambar asli
     heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
-    heatmap = np.uint8(255 * heatmap)  # Ubah ke 8-bit format
-    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)  # Tambahkan warna
+    heatmap = np.uint8(255 * heatmap)  # Convert to 8-bit format
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)  # Add color
 
-    # Overlay heatmap dengan gambar asli
     overlay = cv2.addWeighted(original_img, 1 - alpha, heatmap, alpha, 0)
 
-    # Simpan hasil Grad-CAM yang berwarna
-    gradcam_path = os.path.join(RESULT_FOLDER, "gradcam_colored.jpg")
+    gradcam_filename = f"gradcam_{os.path.basename(image_path)}"
+    gradcam_path = os.path.join(RESULT_FOLDER, gradcam_filename)
     cv2.imwrite(gradcam_path, overlay)
 
-    return gradcam_path, predictions.numpy(), class_idx
-
-
-def explain_prediction(class_idx):
-    explanations = {
-        0: "AI memprediksi ini sebagai **Mata Normal**, karena tidak terlihat gejala khas seperti peningkatan tekanan intraokular atau perubahan pada saraf optik.",
-        1: "AI mendeteksi **Glaukoma**, yang ditandai dengan perubahan di saraf optik dan tekanan mata yang tinggi.",
-    }
-    return explanations.get(class_idx, "AI tidak bisa memberikan penjelasan untuk prediksi ini.")
+    return gradcam_filename, predictions.numpy(), class_idx
 
 
 @app.route("/", methods=["POST"])
-def home():
+def upload():
     if "file" not in request.files:
-        return jsonify({"error": "No file part"}), 400
+        return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "No file selected"}), 400
 
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(filepath)
 
-        gradcam_path, predictions, class_idx = generate_gradcam(filepath, model)
+        gradcam_filename, predictions, class_idx = generate_gradcam(filepath, model)
         predicted_class = CLASS_NAMES[class_idx]
-        confidence = float(round(100 * np.max(predictions), 2))  # Fix here
-        explanation = explain_prediction(class_idx)
-
+        confidence = float(round(100 * np.max(predictions), 2))
+        explanation = EXPLANATIONS[predicted_class]
         return jsonify({
-            "uploaded_image": filepath,
-            "gradcam_image": gradcam_path,
+            "uploaded_image": filename,
+            "gradcam_image": gradcam_filename,
             "predicted_class": predicted_class,
             "confidence": confidence,
-            "explanation": explanation
+            "explanation": explanation,
         })
 
     return jsonify({"error": "Invalid file type"}), 400
 
+@app.route('/gradcam/<filename>', methods=['GET'])
+def get_gradcam_image(filename):
+    return send_from_directory(app.config['RESULT_FOLDER'], filename)
 
 if __name__ == "__main__":
     app.run(debug=True)

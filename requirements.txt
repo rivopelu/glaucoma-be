@@ -44,3 +44,4 @@ wrapt==1.17.2
 zipp==3.21.0
 
 opencv-python~=4.11.0.86
+flask-cors~=5.0.1
