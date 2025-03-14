@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, redirect
+from flask import Flask, request, jsonify
 import os
 import numpy as np
 import cv2
@@ -35,7 +35,7 @@ def preprocess_image(image_path):
     return img
 
 
-def generate_gradcam(image_path, model, layer_name="conv1_conv"):
+def generate_gradcam(image_path, model, layer_name="conv1_conv", alpha=0.6):
     img = preprocess_image(image_path)
     img_tensor = tf.convert_to_tensor(img)
 
@@ -54,19 +54,23 @@ def generate_gradcam(image_path, model, layer_name="conv1_conv"):
     conv_outputs = conv_outputs[0]
     heatmap = tf.reduce_mean(tf.multiply(conv_outputs, pooled_grads), axis=-1)
     heatmap = np.maximum(heatmap, 0)
-    heatmap /= np.max(heatmap)
+    heatmap /= np.max(heatmap)  # Normalisasi heatmap
 
+    # Baca gambar asli
     original_img = cv2.imread(image_path)
     original_img = cv2.resize(original_img, (224, 224))
 
+    # Resize heatmap agar sesuai dengan ukuran gambar asli
     heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
-    heatmap = np.uint8(255 * heatmap)
-    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    heatmap = np.uint8(255 * heatmap)  # Ubah ke 8-bit format
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)  # Tambahkan warna
 
-    superimposed_img = cv2.addWeighted(original_img, 0.6, heatmap, 0.4, 0)
+    # Overlay heatmap dengan gambar asli
+    overlay = cv2.addWeighted(original_img, 1 - alpha, heatmap, alpha, 0)
 
-    gradcam_path = os.path.join(RESULT_FOLDER, "gradcam.jpg")
-    cv2.imwrite(gradcam_path, superimposed_img)
+    # Simpan hasil Grad-CAM yang berwarna
+    gradcam_path = os.path.join(RESULT_FOLDER, "gradcam_colored.jpg")
+    cv2.imwrite(gradcam_path, overlay)
 
     return gradcam_path, predictions.numpy(), class_idx
 
@@ -79,36 +83,34 @@ def explain_prediction(class_idx):
     return explanations.get(class_idx, "AI tidak bisa memberikan penjelasan untuk prediksi ini.")
 
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["POST"])
 def home():
-    if request.method == "POST":
-        if "file" not in request.files:
-            return redirect(request.url)
+    if "file" not in request.files:
+        return jsonify({"error": "No file part"}), 400
 
-        file = request.files["file"]
-        if file.filename == "":
-            return redirect(request.url)
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
 
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-            file.save(filepath)
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        file.save(filepath)
 
-            gradcam_path, predictions, class_idx = generate_gradcam(filepath, model)
-            predicted_class = CLASS_NAMES[class_idx]
-            confidence = round(100 * np.max(predictions), 2)
-            explanation = explain_prediction(class_idx)
+        gradcam_path, predictions, class_idx = generate_gradcam(filepath, model)
+        predicted_class = CLASS_NAMES[class_idx]
+        confidence = float(round(100 * np.max(predictions), 2))  # Fix here
+        explanation = explain_prediction(class_idx)
 
-            return render_template(
-                "index.html",
-                uploaded_image=filepath,
-                gradcam_image=gradcam_path,
-                predicted_class=predicted_class,
-                confidence=confidence,
-                explanation=explanation,
-            )
+        return jsonify({
+            "uploaded_image": filepath,
+            "gradcam_image": gradcam_path,
+            "predicted_class": predicted_class,
+            "confidence": confidence,
+            "explanation": explanation
+        })
 
-    return render_template("index.html")
+    return jsonify({"error": "Invalid file type"}), 400
 
 
 if __name__ == "__main__":
